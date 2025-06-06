@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import json
 import os
+from dotenv import load_dotenv
 
 intents = discord.Intents.default()
 intents.members = True
@@ -39,10 +40,12 @@ def es_staff(member):
     return any(role.id == STAFF_ROLE_ID for role in member.roles)
 
 async def actualizar_roles(usuario, guild, cantidad):
+    # Primero quitar todos los roles de niveles que tenga
     for role_id in roles_por_reseñas.values():
         rol = guild.get_role(role_id)
         if rol and rol in usuario.roles:
             await usuario.remove_roles(rol)
+    # Añadir el rol correcto según cantidad de reseñas
     for min_reseñas, role_id in sorted(roles_por_reseñas.items(), reverse=True):
         if cantidad >= min_reseñas:
             rol = guild.get_role(role_id)
@@ -50,50 +53,39 @@ async def actualizar_roles(usuario, guild, cantidad):
                 await usuario.add_roles(rol)
             break
 
-def encontrar_usuario_valido(ctx):
-    usuarios_validos = []
-    for member in ctx.channel.members:
-        if not member.bot and not es_staff(member):
-            usuarios_validos.append(member)
-    return usuarios_validos
-
 @bot.command()
 @commands.has_role(STAFF_ROLE_ID)
-async def addreview(ctx, cantidad: int = 1):
-    candidatos = encontrar_usuario_valido(ctx)
-    if len(candidatos) == 0:
-        await ctx.send("❌ No hay usuarios válidos en este canal.")
+async def addreview(ctx, member: discord.Member = None, cantidad: int = 1):
+    if member is None:
+        await ctx.send("❌ Debes mencionar al usuario a quien quieres añadir reseñas.")
         return
-    if len(candidatos) > 1:
-        await ctx.send("❌ Hay más de un usuario válido, no sé a quién añadir reseñas.")
+    if es_staff(member) or member.bot:
+        await ctx.send("❌ No puedes añadir reseñas a un staff o bot.")
         return
 
-    usuario = candidatos[0]
-    uid = str(usuario.id)
+    uid = str(member.id)
     reviews[uid] = reviews.get(uid, 0) + cantidad
     guardar_reviews()
 
-    await actualizar_roles(usuario, ctx.guild, reviews[uid])
-    await ctx.send(f'✅ {cantidad} reseña(s) añadida(s) a {usuario.mention}. Total: {reviews[uid]}.')
+    await actualizar_roles(member, ctx.guild, reviews[uid])
+    await ctx.send(f'✅ {cantidad} reseña(s) añadida(s) a {member.mention}. Total: {reviews[uid]}.')
 
 @bot.command()
 @commands.has_role(STAFF_ROLE_ID)
-async def deletereview(ctx, cantidad: int = 1):
-    candidatos = encontrar_usuario_valido(ctx)
-    if len(candidatos) == 0:
-        await ctx.send("❌ No hay usuarios válidos en este canal.")
+async def deletereview(ctx, member: discord.Member = None, cantidad: int = 1):
+    if member is None:
+        await ctx.send("❌ Debes mencionar al usuario a quien quieres quitar reseñas.")
         return
-    if len(candidatos) > 1:
-        await ctx.send("❌ Hay más de un usuario válido, no sé a quién quitar reseñas.")
+    if es_staff(member) or member.bot:
+        await ctx.send("❌ No puedes quitar reseñas a un staff o bot.")
         return
 
-    usuario = candidatos[0]
-    uid = str(usuario.id)
+    uid = str(member.id)
     reviews[uid] = max(0, reviews.get(uid, 0) - cantidad)
     guardar_reviews()
 
-    await actualizar_roles(usuario, ctx.guild, reviews[uid])
-    await ctx.send(f'✅ {cantidad} reseña(s) eliminada(s) de {usuario.mention}. Total: {reviews[uid]}.')
+    await actualizar_roles(member, ctx.guild, reviews[uid])
+    await ctx.send(f'✅ {cantidad} reseña(s) eliminada(s) de {member.mention}. Total: {reviews[uid]}.')
 
 @bot.command()
 async def reviewscount(ctx, member: discord.Member = None):
@@ -102,6 +94,18 @@ async def reviewscount(ctx, member: discord.Member = None):
     uid = str(member.id)
     cantidad = reviews.get(uid, 0)
     await ctx.send(f'{member.mention} tiene {cantidad} reseña(s).')
+
+@bot.command()
+async def comandos(ctx):
+    texto = (
+        "**Lista de comandos disponibles:**\n\n"
+        "`,addreview @usuario [cantidad]` - Añade reseñas al usuario mencionado. La cantidad es opcional y por defecto es 1.\n"
+        "`,deletereview @usuario [cantidad]` - Quita reseñas al usuario mencionado. La cantidad es opcional y por defecto es 1.\n"
+        "`,reviewscount [@usuario]` - Muestra cuántas reseñas tiene el usuario mencionado o a ti si no mencionas a nadie.\n"
+        "`,comandos` - Muestra esta lista de comandos.\n\n"
+        "**Nota:** Los comandos `addreview` y `deletereview` solo pueden ser usados por staff."
+    )
+    await ctx.send(texto)
 
 @addreview.error
 @deletereview.error
@@ -112,8 +116,6 @@ async def error_handler(ctx, error):
         await ctx.send(f"❌ Error inesperado: {error}")
 
 print("Bot en marcha...")
-from dotenv import load_dotenv
-import os
 
 load_dotenv()
 bot.run(os.getenv("DISCORD_TOKEN"))
